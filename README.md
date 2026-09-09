@@ -583,6 +583,30 @@ Nenhuma pergunta de produto em aberto no momento.
 O código ainda não existe. A estrutura dele entra na seção
 [Repositório e arquitetura](#repositório-e-arquitetura) quando for definida.
 
+### Para quem clonar
+
+**Tudo isso é do repositório, não da máquina de quem escreveu.** Quem clonar recebe
+os agentes, as decisões e as convenções junto com o código — não é configuração
+pessoal que ficou para trás por acidente.
+
+- **`CLAUDE.md`** é o contexto do projeto: convenções de código, glossário do
+  domínio e os parâmetros já definidos. Ferramentas de IA o carregam sozinhas;
+  para uma pessoa, é a leitura obrigatória depois deste README.
+- **`.claude/agents/`** são oito agentes especializados, um por domínio. Cada um
+  declara o que decide, o que **não** decide e para quem devolve. Servem tanto
+  para orientar uma IA quanto para deixar explícito, para uma pessoa, onde cada
+  tipo de decisão pertence.
+- **`.claude/commands/decisao.md`** é o comando `/decisao`, que cria um ADR já
+  numerado e atualiza o índice.
+- **`docs/decisions/`** é o porquê de cada escolha, com as alternativas que foram
+  descartadas. Antes de propor uma mudança de rumo, vale conferir se o caminho já
+  foi considerado e recusado — e por quê.
+
+A única coisa **não** versionada é `.claude/settings.local.json`, que guarda
+permissões aprovadas localmente e é legitimamente de cada máquina. Se algum dia o
+projeto precisar de configuração compartilhada, ela vai em `.claude/settings.json`,
+esse sim versionado.
+
 ---
 
 ## Glossário do domínio
