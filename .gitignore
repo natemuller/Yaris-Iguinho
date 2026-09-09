@@ -1,0 +1,51 @@
+# Dependências
+node_modules/
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/releases
+
+# Build
+dist/
+build/
+out/
+.next/
+*.tsbuildinfo
+
+# Segredos — nunca commitar (ver CLAUDE.md)
+.env
+.env.*
+!.env.example
+
+# Banco local (SQLite)
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+data/
+
+# Imagens de stories baixadas
+storage/
+*.tmp
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Testes e cobertura
+coverage/
+.vitest/
+
+# Editores e SO
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code — configuração local do usuário
+.claude/settings.local.json
