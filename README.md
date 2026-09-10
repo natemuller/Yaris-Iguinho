@@ -103,8 +103,9 @@ ver [Respostas já definidas](#respostas-já-definidas).
 - Notificações fora do WhatsApp (e-mail, push, Telegram)
 
 > **Consequência técnica de não ter feedback:** o sistema só **envia** mensagens,
-> nunca recebe. Não há webhook, não há URL pública, não há interpretação de
-> resposta. Isso simplifica bastante a integração e o deploy.
+> nunca recebe. Não há webhook de entrada nem interpretação de resposta da Meta.
+> A interface web continua sendo hospedada com URL pública, mas ela serve só as
+> próprias telas — nada da Meta chega nela. Isso simplifica bastante a integração.
 
 ---
 
@@ -284,7 +285,6 @@ Ideias registradas para não se perderem. **Nenhuma delas entra na v1.**
 | **Lista clicável** | O desenho preferido: tocar num restaurante e receber a foto daquele cardápio. Exige o mesmo webhook do feedback — os dois devem entrar juntos |
 | **Mais de 4 restaurantes** | A grade 2×2 trava a v1 em quatro. Passar disso exige decidir a estratégia de layout — só a 2×2 preserva a proporção 9:16 |
 | **Aprendizado a partir do feedback** | Só faz sentido depois de acumular respostas. Pode ser peso no prompt da IA ou score próprio |
-| Penalidade por repetição | Informar à IA quais restaurantes foram sugeridos nos últimos dias, para forçar rotação |
 | Perfil de preferências | "Gosto de peixe, evito fígado" entrando no prompt da recomendação. ⚠️ **Bloqueado pelo free tier:** isso é dado pessoal indo para pipeline de treinamento — exige revisitar o [ADR 0003](docs/decisions/0003-gemini-free-tier-como-provedor-de-ia.md) |
 | Distância e tempo a pé | Um cardápio ótimo a 25 min de caminhada não é ótimo |
 | Preço do prato feito | Comparar custo, além do prato |
@@ -310,8 +310,8 @@ Premissa transversal: **TypeScript em modo `strict`**, do banco à interface.
 | Runtime | **Node.js 22 LTS** | Ecossistema maduro e suporte a TS já confortável |
 | Linguagem | **TypeScript** (`strict: true`) | Requisito do projeto |
 | Validação | **Zod** | Valida todas as bordas — provedor de stories, saída da IA, formulários — e gera os tipos |
-| Banco | **SQLite** + **Drizzle ORM** | Um usuário e baixo volume: SQLite basta e é um arquivo só. Drizzle mantém o schema tipado e permite migrar para Postgres depois sem reescrever |
-| Agendamento | **node-cron** | O caso de uso é literalmente "todo dia às 11h". BullMQ com Redis é excesso na v1 |
+| Banco | **SQLite** + **Drizzle ORM** | Um usuário e baixo volume: SQLite basta e é um arquivo só. Drizzle mantém o schema tipado e permite migrar para Postgres sem reescrever — **decisivo com deploy hospedado**, onde o disco pode ser efêmero (ver [Deploy](#deploy)) |
+| Agendamento | **node-cron** | O caso de uso é literalmente "todo dia às 11h". BullMQ com Redis é excesso na v1. **Ressalva:** só serve se o processo não hibernar; hospedado, o gatilho pode precisar vir de fora (ver [Deploy](#deploy)) |
 | Testes | **Vitest** | Rápido, TS nativo, API familiar |
 | Lint e formatação | **Biome** | Uma ferramenta só, no lugar de ESLint + Prettier |
 | Logs | **Pino** | Log estruturado, essencial para depurar uma execução que roda sem ninguém olhando |
@@ -343,8 +343,9 @@ em relação a um coletor agressivo.
 ### Integração com o WhatsApp
 
 Sem feedback na v1, a integração é **só de saída**: uma mensagem por dia,
-nenhuma resposta recebida. Isso elimina o webhook, a URL pública e todo o
-tratamento de mensagens de entrada.
+nenhuma resposta recebida. Isso elimina o webhook de entrada e todo o
+tratamento de mensagens recebidas. (A interface web tem URL pública, mas é
+independente da Meta — ver [Deploy](#deploy).)
 
 > **Esclarecimento importante sobre o número.** A Cloud API exige um número
 > dedicado para o **remetente** (o bot), não para o destinatário. Você continua
@@ -376,9 +377,11 @@ de qualquer conteúdo dinâmico complexo e faz cadastrar ou remover restaurante
 **não exigir nova aprovação** da Meta.
 
 - **Mensagem 1:** template com cabeçalho de mídia — saudação fixa + a imagem
-  composta com os stories lado a lado
-- **Mensagem 2:** template com uma variável de linha única — a sugestão do dia e
-  quem não postou
+  composta numa grade 2×2 fixa
+  ([ADR 0005](docs/decisions/0005-grade-2x2-fixa-com-quatro-restaurantes.md))
+- **Mensagem 2:** template com uma variável de linha única — só a sugestão do dia
+  em frase natural. Quem não postou já aparece como tile de "Cardápio
+  indisponível" na própria grade
 
 **O que fica adiado:** a lista clicável, onde tocar num restaurante traz a foto
 daquele cardápio. É o melhor formato, mas exige webhook. Quando ele voltar, o
@@ -403,9 +406,9 @@ webhook que tinha tirado o feedback da v1.
 
 #### Por que o free tier resolve, e o que ele cobra
 
-O sistema faz **cerca de 11 chamadas por dia útil** — dez imagens de story e uma
-de recomendação. Os limites reportados para a linha Flash no free tier são de
-~15 requisições por minuto e **~1.500 por dia**: folga de mais de cem vezes sobre
+O sistema faz **cerca de 5 chamadas por dia útil** — até quatro imagens de story e
+uma de recomendação. Os limites reportados para a linha Flash no free tier são de
+~15 requisições por minuto e **~1.500 por dia**: folga de centenas de vezes sobre
 o uso real. Testar prompt e reprocessar não pesam.
 
 O custo não é dinheiro, é privacidade. Pelos
@@ -474,28 +477,53 @@ para desenhar componente do zero.
 
 ### Deploy
 
-Sem webhook, o sistema precisa apenas de **execução agendada confiável** e de
-**armazenamento persistente** — não de URL pública para receber chamadas. Com
-orçamento zero, a opção mais coerente é inesperada:
+Nada de webhook de entrada da Meta — a integração com o WhatsApp é só de saída.
+Mas o usuário decidiu **hospedar o sistema num serviço gratuito**, e não rodá-lo
+na própria máquina, por dois motivos:
 
-**Rodar na sua própria máquina.** A mensagem sai às 11h de um dia útil, que é
-exatamente quando o computador de trabalho está ligado e com você na frente dele.
-Agendamento pelo Task Scheduler do Windows, SQLite num arquivo local, sem
-hospedagem, sem custo, sem URL pública. E se a integração com o WhatsApp acabar
-sendo por biblioteca não oficial, ela precisa de uma sessão de pé de qualquer
-jeito — o que combina com execução local.
+- **A interface web precisa estar sempre no ar.** O cadastro, o horário e o
+  histórico são acessados tanto do desktop quanto do navegador do celular. Só a
+  interação do WhatsApp é exclusiva do celular; a interface é de qualquer lugar.
+- **O desenvolvimento acontece em duas máquinas** — um Mac e um Windows, usados em
+  momentos diferentes do dia. Nenhuma delas fica ligada de forma previsível às
+  11h, então "roda na máquina de trabalho" deixou de ser uma opção confiável.
 
-Alternativas, caso a máquina local não sirva:
+O que o deploy precisa entregar, então:
 
-- **Railway** ou **Fly.io** em plano gratuito: cômodo, mas as franquias mudam e
-  costumam hibernar processo ocioso
-- **VPS com Docker**: mais controle, mas tem custo mensal — fora do orçamento
+| Requisito | Por quê |
+|---|---|
+| **Execução agendada confiável em dia útil** | A entrega diária é o produto. Se o agendador não dispara, não há sistema |
+| **Armazenamento persistente** | Perfis, `DailyMenu`, `Suggestion` e as imagens do histórico de 30 dias não podem sumir num restart ou redeploy |
+| **URL pública para a interface web** | Acesso do desktop e do celular. Não recebe chamadas da Meta — serve só as telas do próprio sistema |
+| **Custo zero** | Sem assinatura, sem cartão |
 
-Atenção em qualquer opção hospedada: plataforma que hiberna processo ocioso
-simplesmente não dispara o agendamento. A entrega diária é o produto — se ela não
-sai, não há sistema.
+**Duas armadilhas do plano gratuito**, ambas fatais para este sistema:
 
-Segredos em variáveis de ambiente, **nunca commitados**, inclusive rodando local.
+1. **Hibernação de processo ocioso.** Plataforma que dorme o processo depois de
+   alguns minutos sem tráfego não acorda sozinha às 11h para disparar o
+   `node-cron` — e a mensagem não sai. O agendamento tem que vir de algo externo
+   que não hiberna (um cron da própria plataforma, um GitHub Actions agendado
+   batendo num endpoint, um pinger externo) ou de uma plataforma cujo plano
+   gratuito não hiberna.
+2. **Sistema de arquivos efêmero.** Em várias plataformas gratuitas o disco é
+   zerado a cada deploy ou restart. SQLite num arquivo local, nesse cenário,
+   perde o histórico. Exige volume persistente de verdade ou um banco gerenciado
+   com plano gratuito (a sugestão de Drizzle já previa a migração para Postgres
+   sem reescrever o schema).
+
+**A plataforma específica ainda não está escolhida.** O martelo só bate **depois
+da v1 implementada** — não é pré-requisito para começar. A inclinação atual é a
+**Cloudflare** (Workers/Pages, com Cron Triggers resolvendo o agendamento e D1 o
+armazenamento), mas sem decisão. Vira ADR quando fechada, com o critério de
+atender aos quatro requisitos acima sem cair em nenhuma das duas armadilhas.
+
+> ⚠️ Se a escolha for a Cloudflare, ela **é serverless** e mexe nas sugestões da
+> seção anterior: em vez de Node.js + SQLite + `node-cron`, seria o runtime de
+> Workers + D1 + Cron Triggers. Vale ter isso em mente ao implementar a v1, para
+> não amarrar o código a APIs de Node que os Workers não têm.
+
+Segredos em variáveis de ambiente, **nunca commitados**. `.env.example` com as
+chaves e sem os valores, para subir o projeto em qualquer uma das duas máquinas.
 
 ---
 
@@ -509,9 +537,9 @@ Segredos em variáveis de ambiente, **nunca commitados**, inclusive rodando loca
 | R4 | Restaurante que posta o cardápio **depois** do horário de coleta | Médio | Coletar perto do horário de envio; considerar uma segunda passada |
 | R5 | A IA extrair o prato errado, ou escolher mal, e me mandar a um lugar que não tem aquilo | Médio | Sem feedback, o sistema **não tem como detectar isso sozinho** na v1. Mitigação: mostrar a imagem original e a justificativa no histórico, para eu conferir na mão |
 | R6 | ~~Sem histórico, a IA repete o mesmo restaurante~~ — **tratado** pelo critério de destaque relativo com janela de duas semanas ([ADR 0006](docs/decisions/0006-recomendar-por-destaque-relativo-do-dia.md)) | — | Restam os riscos derivados, R13 e R14 |
-| R7 | Scraping próprio derrubar a conta usada para coletar | Médio | Conta secundária dedicada, nunca a pessoal; volume baixo (10 perfis, 1x/dia) ajuda |
+| R7 | Scraping próprio derrubar a conta usada para coletar | Médio | Conta secundária dedicada, nunca a pessoal; volume baixo (4 perfis, 1x/dia) ajuda |
 | R8 | ~~Orçamento zero incompatível com IA em nuvem~~ — **resolvido** pelo free tier do Gemini ([ADR 0003](docs/decisions/0003-gemini-free-tier-como-provedor-de-ia.md)) | — | Resta o risco derivado, R10 |
-| R9 | Rodando na máquina local, um dia com o computador desligado é um dia sem mensagem | Baixo | Aceitável na v1; a interface mostra que não rodou |
+| R9 | **Plano gratuito que hiberna o processo ou zera o disco.** Processo dormindo não dispara o agendador às 11h; disco efêmero apaga o histórico a cada deploy | Alto | Agendamento por gatilho externo que não hiberna (cron da plataforma ou GitHub Actions); banco em volume persistente ou serviço gerenciado gratuito. Critério da escolha da plataforma — ver seção Deploy |
 | R10 | **Limites de free tier mudam sem aviso e sem garantia contratual.** Modelos já foram removidos do tier gratuito antes | Médio | Manter o modelo atrás de interface própria; Ollama local como plano B |
 | R11 | No free tier, o conteúdo enviado alimenta o treinamento do Google e pode ser lido por revisores humanos | Baixo hoje | Aceitável porque o conteúdo é público. Regra: **nada de pessoal no prompt**. Bloqueia o item "perfil de preferências" do backlog |
 | R12 | **A imagem composta pode ficar ilegível.** Mesmo na grade 2×2, cada tile ocupa um quarto da imagem, e o WhatsApp ainda recomprime. Ler o cardápio provavelmente exige zoom | Alto | Grade 2×2 fixa preserva o 9:16 e maximiza a área na bolha ([ADR 0005](docs/decisions/0005-grade-2x2-fixa-com-quatro-restaurantes.md)). Resta **montar com stories reais e olhar no celular** — não se resolve no papel |
@@ -524,12 +552,12 @@ Segredos em variáveis de ambiente, **nunca commitados**, inclusive rodando loca
 |---|---|
 | Quantos restaurantes? | **4 na v1** — os mesmos usados para teste. Até 10 é horizonte pós-v1 |
 | Todo dia ou só dias úteis? | **Dias úteis** |
-| Perfil que não postou cardápio? | **Aparece na mensagem**, nomeado: "o restaurante X não postou cardápio até agora" |
+| Perfil que não postou cardápio? | **Mantém o tile na grade 2×2**, com fundo neutro e o texto "Cardápio indisponível" — a grade nunca tem buraco ([ADR 0005](docs/decisions/0005-grade-2x2-fixa-com-quatro-restaurantes.md)) |
 | Provedor pago de stories? | **Não. Custo zero** — o que deixa o scraping próprio como único caminho |
 | Número de WhatsApp novo? | **Não.** Cloud API com o número de teste gratuito da Meta como remetente; você recebe no seu número atual |
 | Formato da mensagem? | **Duas mensagens de template**: saudação + imagem composta com os cardápios, depois a sugestão do dia ([ADR 0004](docs/decisions/0004-mensagem-em-dois-templates-com-imagem-composta.md)) |
 | Histórico? | **30 dias**, só na interface. A conversa do WhatsApp é descartável |
-| Qual provedor de IA, com custo zero? | **Free tier do Gemini, linha Flash.** ~11 chamadas/dia contra um teto reportado de ~1.500/dia ([ADR 0003](docs/decisions/0003-gemini-free-tier-como-provedor-de-ia.md)) |
+| Qual provedor de IA, com custo zero? | **Free tier do Gemini, linha Flash.** ~5 chamadas/dia contra um teto reportado de ~1.500/dia ([ADR 0003](docs/decisions/0003-gemini-free-tier-como-provedor-de-ia.md)) |
 
 ### Perguntas em aberto
 
@@ -549,6 +577,19 @@ Itens de verificação do WhatsApp, que também não bloqueiam:
 - [ ] **Legibilidade da imagem composta** com stories reais, olhando no celular —
       é o item de maior risco do ADR 0004 e não se resolve no papel
 - [ ] Limites do número de teste gratuito da Meta, no painel
+
+Decisão de deploy adiada para **depois da v1 implementada** — não bloqueia nada
+agora. Inclinação atual: Cloudflare. A fechar em ADR antes de a hospedagem ser
+montada:
+
+- [ ] **Confirmar a plataforma** (Cloudflare ou outra) contra os quatro requisitos
+      da seção [Deploy](#deploy), sem hibernar o processo nem zerar o disco
+- [ ] **Como disparar o agendamento diário** de forma que não dependa de o
+      processo estar acordado (Cron Triggers da plataforma vs. GitHub Actions)
+- [ ] **Onde fica o banco** — volume persistente, D1 ou Postgres gerenciado
+      gratuito, já que a sugestão de Drizzle prevê as opções
+- [ ] Se a plataforma for serverless, **revisar as sugestões de stack** (runtime,
+      banco, agendamento) antes de escrever código que dependa de APIs de Node
 
 Nenhuma pergunta de produto em aberto no momento.
 

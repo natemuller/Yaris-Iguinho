@@ -84,10 +84,16 @@ projeto. Cada um tem escopo declarado e sabe quando devolver o trabalho.
 | `integracao-whatsapp` | Envio da mensagem diária (só de saída) |
 | `interface-web` | Telas de cadastro, configuração e histórico |
 | `qa` | Testes, casos de borda, verificação dos critérios de aceite |
+| `professor` | Ensina o usuário a chegar na solução; não implementa nem é dono de domínio |
 
 Regra geral: **o agente decide dentro do próprio domínio e registra em ADR.** Se a
 decisão atravessa domínios (um contrato, o modelo de dados, a stack), ela é do
 `arquiteto`.
+
+O `professor` é a exceção ao "um por domínio": ele não decide nada do produto,
+ensina o usuário a extrair a solução e aciona os outros agentes quando precisa da
+análise de domínio para montar a explicação. Só escreve código sob pedido
+explícito e com confirmação.
 
 ---
 
@@ -179,8 +185,9 @@ Erros que já custaram tempo em projetos parecidos:
    o destinatário) e **template aprovado** para mensagens iniciadas pelo negócio.
    A mensagem diária é iniciada pelo negócio.
 3. **O provedor de IA é o free tier do Gemini** ([ADR 0003](docs/decisions/0003-gemini-free-tier-como-provedor-de-ia.md)).
-   São ~11 chamadas por dia útil contra um teto reportado de ~1.500 — folga
-   enorme. Mas no free tier **o Google usa o conteúdo enviado para treinar seus
+   São ~5 chamadas por dia útil (até quatro imagens de story e uma de
+   recomendação) contra um teto reportado de ~1.500 — folga enorme. Mas no free
+   tier **o Google usa o conteúdo enviado para treinar seus
    produtos, e revisores humanos podem lê-lo**. Daí a regra abaixo.
 4. **Story tem prazo de 24h.** Se a coleta não rodou, o dado se perdeu — não dá
    para buscar depois.
